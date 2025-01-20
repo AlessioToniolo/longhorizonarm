@@ -1,0 +1,9 @@
+version: '3'
+
+services:
+  # Name of our service
+  ros_dev:
+    # Build from the Dockerfile in current directory
+    build: .
+    
+    # Mount volumes (this creates the live link between your computer and con
