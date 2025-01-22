@@ -1,0 +1,14 @@
+numpy
+scipy
+RPi.GPIO
+adafruit-circuitpython-servokit
+pyrealsense2
+opencv-python
+torch
+torchvision
+transformers
+groundingdino-py
+pybullet
+python-dotenv
+pytest
+black
