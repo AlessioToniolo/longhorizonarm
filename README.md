@@ -1,6 +1,7 @@
 # Long Horizon Robot Arm
 
 TODOs:
+- [ ] setup pyrealsense2 from source then add setup instructions (wget) in this readme
 - [ ] Tune max_vel and max_accel of servos
 - [ ] Add in parameter to Servo class for custom max_vel and max_accel fields (to be tweaked in ServoController.py). Reason? Lower joints may need lower maxes than later joints
 - [ ] may need to add in additional delays, specificlaly worried about move_in_synced where motion profiles are reset after move_to_pos
@@ -30,7 +31,5 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ssh nvidia@<jetson-ip-from-ifconfig>
 python3 -m venv venv
 source venv/bin/activate
-wget https://github.com/IntelRealSense/librealsense/releases/download/v2.56.3/pyrealsense2-2.56.3.7838-cp310-cp310-manylinux1_x86_64_beta.whl
-pip install pyrealsense2-2.56.3.7838-cp310-cp310-manylinux1_x86_64_beta.whl
 pip install -r requirements.txt
 ```
