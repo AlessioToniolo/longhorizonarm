@@ -3,7 +3,7 @@ import time
 from ..hardware.ServoController import ServoController
 
 class Kinematics:
-    def __init__(self, controller):
+    def __init__(self, controller: ServoController):
         self.controller = controller
 
         self.l1 = 145.1 #mm

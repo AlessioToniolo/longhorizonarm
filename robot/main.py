@@ -42,7 +42,7 @@ def test_motion_profiles():
 def test_kinematics():
     controller = ServoController()
     kinematics = Kinematics(controller)
-    x, y, z = 200, 0, 200
+    x, y, z = 150, 0, 175
     angles = kinematics.inverse_kinematics(x, y, z)
     controller.stop()
     return len(angles) == 4
@@ -62,6 +62,19 @@ def test_workspace_movement():
     controller.stop()
     return True
 
+def test_basic_path_finder():
+    controller = ServoController()
+    kinematics = Kinematics(controller)
+    path_finder = PathFinder(kinematics)
+
+    start = np.array([100, 0, 100])
+    end = np.array([200, 200, 100])
+    obstacle = np.array([150, 100, 100])  # obstacle center
+    obstacle_size = 50  # mm
+
+    path = path_finder.find_path(start, end, obstacle, obstacle_size)
+    path_finder.execute_path(path)
+
 def main():
     # test_servo_init()
     # test_basic_movement()
@@ -69,6 +82,7 @@ def main():
     # test_motion_profiles()
     # test_kinematics()
     # test_workspace_movement()
+    # test_basic_path_finder()
     pass
 
 if __name__ == "__main__":

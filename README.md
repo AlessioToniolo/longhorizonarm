@@ -1,6 +1,7 @@
 # Long Horizon Robot Arm
 
 TODOs:
+- [ ] calibrate servo home positions and limits (most gruesome part of tomorrow) (should it be vertical? how do we allot it 270 range?)
 - [ ] setup pyrealsense2 from source then add setup instructions (wget) in this readme
 - [ ] Tune max_vel and max_accel of servos
 - [ ] Add in parameter to Servo class for custom max_vel and max_accel fields (to be tweaked in ServoController.py). Reason? Lower joints may need lower maxes than later joints
