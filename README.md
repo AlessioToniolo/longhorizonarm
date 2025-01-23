@@ -1,5 +1,10 @@
 # Long Horizon Robot Arm
 
+TODOs:
+- [ ] Tune max_vel and max_accel of servos
+- [ ] Add in parameter to Servo class for custom max_vel and max_accel fields (to be tweaked in ServoController.py). Reason? Lower joints may need lower maxes than later joints
+
+
 ## Setup Jetson
 ```
 sudo apt update

@@ -17,6 +17,10 @@ class ServoController:
         for i in range(len(angles)):
             self.servos[i].set_angle(angles[i])
 
+    def move_to_angles_with_profile(self, angles):
+        for i in range(len(angles)):
+            self.servos[i].set_angle_with_profile(angles[i])
+
     def get_current_angles(self):
         return [servo.get_angle() for servo in self.servos]
     
