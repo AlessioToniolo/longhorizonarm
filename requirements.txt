@@ -1,6 +1,6 @@
 numpy
 scipy
-RPi.GPIO
+Jetson.GPIO
 adafruit-circuitpython-servokit
 opencv-python
 torch

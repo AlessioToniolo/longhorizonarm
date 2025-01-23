@@ -134,3 +134,6 @@ jetson-inference/python/training/classification/models/
 jetson-inference/python/training/classification/logs/
 jetson-inference/python/training/detection/ssd/models/
 jetson-inference/python/training/detection/ssd/logs/
+
+# TODO for Jetson Nano
+librealsense-2.55.1/
