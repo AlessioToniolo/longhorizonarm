@@ -1,27 +1,20 @@
 import numpy as np
 from ..hardware.ServoController import ServoController
 
-def inverse_kinematics(x, y, z, l1, l2, l3):
+def inverse_kinematics(x, y, z, l1, l2, l3, end_effector_angle=0):
     swivel = np.atan2(y, x)
     
     r = np.sqrt(x*x + y*y)
 
-    theta1 = np.atan2(z, r)
+    wx = r - l3*np.cos(end_effector_angle)
+    wz = z - l3*np.sin(end_effector_angle)
 
-    d = np.sqrt(r*r + z*z)
+    d = np.sqrt(wx**2 + wz**2)
+    cos_theta2 = (d*d - l1*l1 - l2*l2)/(2*l1*l2)
+    theta2 = np.arccos(np.clip(cos_theta2, -1.0, 1.0))
 
-    if d > (l2 + l3) or d < abs(l2 - l3):
-        raise Exception("out of reach")
-    
-    cos_theta3 = (d*d - l2*l2 - l3*l3)/(2*l2*l3)
+    theta1 = np.arctan2(wz, wx) - np.arctan2(l2*np.sin(theta2), l1 + l2*np.cos(theta2))
 
-    if cos_theta3 > 1 or cos_theta3 < -1:
-        raise Exception("out of reach")
-    
-    theta3 = np.arccos(cos_theta3)
-    
-    beta = np.arctan2(z, r)
-    gamma = np.arccos((l2*l2 + d*d - l3*l3)/(2*l2*d))
-    theta2 = beta + gamma
+    theta3 = end_effector_angle - theta1 - theta2
 
-    return [theta1, theta2, theta3]
+    return [swivel, theta1, theta2, theta3]
