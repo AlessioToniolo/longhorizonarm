@@ -2,7 +2,6 @@ numpy
 scipy
 RPi.GPIO
 adafruit-circuitpython-servokit
-pyrealsense2==2.54.2.5684
 opencv-python
 torch
 torchvision
