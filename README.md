@@ -7,6 +7,8 @@ TODOs:
 - [ ] Add in parameter to Servo class for custom max_vel and max_accel fields (to be tweaked in ServoController.py). Reason? Lower joints may need lower maxes than later joints
 - [ ] may need to add in additional delays, specificlaly worried about move_in_synced where motion profiles are reset after move_to_pos
 
+[pybullet docs](https://docs.google.com/document/d/10sXEhzFRSnvFcl3XxNGhnD4N2SedqwdAvK3dsihxVUA/edit?tab=t.0#heading=h.2ye70wns7io3)
+
 
 ## Setup Jetson
 ```
