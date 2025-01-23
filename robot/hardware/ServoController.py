@@ -6,10 +6,10 @@ class ServoController:
         self.swivel = Servo(3, 0, 270, 90)
         self.tilt = Servo(5, 0, 270, 90)
         self.second_tilt = Servo(7, 0, 270, 90)
-        self.twist = Servo(11, 0, 270, 90)
+        self.twist = Servo(11, 0, 270, 90) # note, twist comes before wrist on actual embodiment
         self.wrist = Servo(13, 0, 270, 90)
         self.gripper = Servo(15, 0, 270, 90)
-        self.servos = [self.swivel, self.tilt, self.second_tilt, self.twist, self.wrist, self.gripper]
+        self.servos = [self.swivel, self.tilt, self.second_tilt, self.wrist, self.twist, self.gripper]
         self.home_positions = [servo.get_home() for servo in self.servos]
         self.limits = [[servo.get_min_angle(), servo.get_max_angle()] for servo in self.servos]
 
@@ -20,6 +20,10 @@ class ServoController:
     def move_to_angles_with_profile(self, angles):
         for i in range(len(angles)):
             self.servos[i].set_angle_with_profile(angles[i])
+
+    def reset_profiles(self):
+        for servo in self.servos:
+            servo.reset_profile()
 
     def get_current_angles(self):
         return [servo.get_angle() for servo in self.servos]

@@ -70,6 +70,10 @@ class Servo:
         duty_cycle = (pulse_width / 1000000) * self.freq * 100 # pulse_width / period * 100 (percent)
         return duty_cycle
 
+    def reset_profile(self):
+        self.max_velocity = 60
+        self.max_acceleration = 45
+
     def get_angle(self):
         return self.current_angle
 
@@ -94,6 +98,10 @@ class Servo:
             t_cruise = (np.abs(angle_diff) - 2*distance_accel) / self.max_velocity
 
         return [t_accel, t_cruise, t_accel]
+    
+    def calculate_profile_total_time(self, angle_diff):
+        [t_accel, t_cruise, t_decel] = self.calculate_profile(angle_diff)
+        return t_accel + t_cruise + t_decel
 
     def cleanup(self):
         self.pwm.stop()
