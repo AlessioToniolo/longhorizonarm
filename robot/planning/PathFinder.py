@@ -24,3 +24,12 @@ class PathFinder:
     def execute_path(self, path, speed_factor=1.0):
         for point in path:
             self.kinematics.move_to_pos_profiled(point[0], point[1], point[2])
+
+"""
+next steps:
+1. velocity profiling
+2. proper collision checking
+3. RRT
+4. path interpolation (smooooth)
+5. real-time obstacle avoidance?
+"""
