@@ -9,3 +9,4 @@ groundingdino-py
 python-dotenv
 pytest
 black
+pyrealsense2
