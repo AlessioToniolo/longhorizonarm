@@ -1,13 +1,11 @@
 numpy
 scipy
 Jetson.GPIO
-adafruit-circuitpython-servokit
 opencv-python
 torch
 torchvision
 transformers
 groundingdino-py
-pybullet
 python-dotenv
 pytest
 black
