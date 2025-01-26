@@ -1,6 +1,6 @@
 import numpy as np
 import time
-from ..hardware.ServoController import ServoController
+from .ServoController import ServoController
 
 class Kinematics:
     def __init__(self, controller: ServoController):

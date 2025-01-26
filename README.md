@@ -1,11 +1,5 @@
 # Adaptik Robot Arm
 
-TODOs:
-- [ ] calibrate servo home positions and limits (most gruesome part of tomorrow) (should it be vertical? how do we allot it 270 range?)
-- [ ] Tune max_vel and max_accel of servos
-- [ ] Add in parameter to Servo class for custom max_vel and max_accel fields (to be tweaked in ServoController.py). Reason? Lower joints may need lower maxes than later joints
-- [ ] may need to add in additional delays, specificlaly worried about move_in_synced where motion profiles are reset after move_to_pos
-
 ## NVIDIA Jetson Nano Setup
 
 The NVIDIA Jetson Nano we are using is model *P3450*, the *B01* developer kit. This kit will not work with the latest version of the SDK, so we will use V46's image. The following setup guide is for Mac ARM64 and intended to be completed in one sitting with no interruptions. Setup should take around 1hr 30min:
