@@ -8,7 +8,6 @@ transformers
 groundingdino-py
 python-dotenv
 pytest
-black
 pyrealsense2
 ompl
 open3d

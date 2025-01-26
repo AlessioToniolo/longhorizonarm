@@ -1,4 +1,5 @@
 import numpy as np
+import time
 try:
     from ompl import base as ob
     from ompl import geometric as og
