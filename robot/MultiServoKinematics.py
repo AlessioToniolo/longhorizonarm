@@ -4,8 +4,8 @@ import time
 import json
 
 class MultiServoKinematics:
-    def __init__(self, default_max_vel_shoulder=30, default_max_accel_shoulder=10,
-                 default_max_vel_elbow=15, default_max_accel_elbow=5):
+    def __init__(self, default_max_vel_shoulder=30, default_max_accel_shoulder=20,
+                 default_max_vel_elbow=30, default_max_accel_elbow=20):
         self.controller = ArduinoProfiledServoController()
         # Servo IDs
         self.shoulder_servo = 0  # First joint
