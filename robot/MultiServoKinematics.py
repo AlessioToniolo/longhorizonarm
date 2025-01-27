@@ -39,7 +39,7 @@ class MultiServoKinematics:
         
         return [theta1, theta2, theta3]
     
-    def move_to_position(self, x, y, z, max_vel=60, max_accel=30):
+    def move_to_position(self, x, y, z, max_vel=30, max_accel=20):
         """Move arm to specified position using profiled movements"""
         try:
             angles = self.inverse_kinematics(x, y, z)
