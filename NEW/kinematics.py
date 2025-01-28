@@ -128,7 +128,7 @@ class RobotArm:
             print(f"IK solver error: {e}")
             return None
             
-    def move_servo(self, servo_id: int, position: float, use_profile: bool = True) -> None:
+    def move_servo(self, servo_id: int, position: float, use_profile: bool = False) -> None:
         """
         Move a single servo to specified position
         
@@ -146,7 +146,7 @@ class RobotArm:
         time.sleep(0.1)  # Small delay between commands
         
     def move_to(self, x: float, y: float, z: float, 
-                orientation: float = 0, use_profile: bool = True) -> bool:
+                orientation: float = 0, use_profile: bool = False) -> bool:
         """
         Move end effector to target position
         
@@ -166,7 +166,7 @@ class RobotArm:
             self.move_servo(i, angle, use_profile)
         return True
     
-    def center_all(self, use_profile: bool = True) -> None:
+    def center_all(self, use_profile: bool = False) -> None:
         """Center all servos (move to 90 degrees)"""
         for servo_id in range(4):
             self.move_servo(servo_id, 90, use_profile)
@@ -175,19 +175,24 @@ class RobotArm:
         """Close serial connection"""
         self.serial.close()
 
-
 def main():
     # Test the robot arm
     arm = RobotArm()  # Adjust COM port if needed
     
     try:
-        print("Testing arm movements...")
+        print("Initializing arm position...")
+        # Center all servos and wait for completion
+        arm.center_all(use_profile=False)
+        print("Waiting for arm to center (5 seconds)...")
+        time.sleep(5)  # Long delay to ensure arm reaches position
+        
+        print("\nTesting arm movements...")
         
         # Test coordinates (in mm)
         test_positions = [
             #(200, 0, 300),     # Forward and up
-            #(200, 200, 300),   # Forward-right and up
-            (0, 200, 300),     # Right side
+            (200, 200, 300),   # Forward-right and up
+            #(0, 200, 300),     # Right side
         ]
         
         for x, y, z in test_positions:
