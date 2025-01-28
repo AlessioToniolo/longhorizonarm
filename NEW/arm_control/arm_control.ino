@@ -13,8 +13,8 @@ struct ServoConfig {
 
 const ServoConfig SERVOS[] = {
     {13, 90.0, 45.0},  // Base rotation
-    {12, 60.0, 30.0},  // Shoulder 1
-    {14, 60.0, 30.0},  // Shoulder 2
+    {12, 45.0, 15.0},  // Shoulder 1
+    {14, 50.0, 20.0},  // Shoulder 2
     {26, 60.0, 30.0}   // Shoulder 3
 };
 const int NUM_SERVOS = 4;
