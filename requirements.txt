@@ -11,3 +11,4 @@ pytest
 pyrealsense2
 ompl
 open3d
+ikpy
