@@ -12,3 +12,5 @@ pyrealsense2
 ompl
 open3d
 ikpy
+python-dotenv
+anthropic
