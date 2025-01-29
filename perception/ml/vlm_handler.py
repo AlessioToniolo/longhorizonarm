@@ -3,8 +3,11 @@ from perception.camera.realsense_interface import RealSenseInterface
 from perception.ml.vlm_model import VLMModel
 
 class VLMHandler:
-    def __init__(self):
-        self.realsense = RealSenseInterface()
+    def __init__(self, stream = None):
+        if stream == None:
+            self.realsense = RealSenseInterface()
+        else:
+            self.realsense = stream
         self.vlm_model = VLMModel()
 
     def process_frame(self):
