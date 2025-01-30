@@ -1,4 +1,4 @@
-from transformers import AutoProcessor, AutoModelForObjectDetection
+from transformers import AutoModelForObjectDetection, DetrImageProcessor
 import torch
 import numpy as np
 
@@ -9,7 +9,7 @@ class VLMModel:
         Uses DETR (DEtection TRansformer) model from Facebook.
         """
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.processor = AutoProcessor.from_pretrained("facebook/detr-resnet-50")
+        self.processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
         self.model = AutoModelForObjectDetection.from_pretrained("facebook/detr-resnet-50").to(self.device)
         
     def predict(self, frame):
