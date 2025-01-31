@@ -7,8 +7,6 @@ import serial
 import time
 import threading
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from perception.ml.vlm_handler import VLMHandler
 
 load_dotenv()
 
