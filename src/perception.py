@@ -163,3 +163,42 @@ class ScenePerception:
         """Clean up resources"""
         self.pipeline.stop()
         cv2.destroyAllWindows()
+
+
+def main():
+    """
+    Main function to test ScenePerception functionality
+    """
+    try:
+        # Initialize ScenePerception with visualization enabled
+        scene = ScenePerception(enable_visualization=True)
+        print("ScenePerception initialized successfully")
+        print(f"Using device: {scene.device}")
+        
+        # Simple loop to continuously process frames
+        print("Starting main loop. Press Ctrl+C to exit...")
+        while True:
+            # Get and process scene objects
+            objects = scene.get_scene_objects()
+            
+            # Print detected objects and their positions
+            if objects:
+                print("\nDetected Objects:")
+                for obj in objects:
+                    print(f"- {obj['label']} (confidence: {obj['score']:.2f})")
+                    print(f"  Position: X={obj['position'][0]:.3f}, "
+                          f"Y={obj['position'][1]:.3f}, "
+                          f"Z={obj['position'][2]:.3f}")
+            
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")
+    finally:
+        # Clean up resources
+        if 'scene' in locals():
+            scene.stop()
+        print("Cleanup complete")
+
+if __name__ == "__main__":
+    main()
