@@ -125,3 +125,42 @@ class ScenePerception:
         """Clean up resources"""
         self.pipeline.stop()
         cv2.destroyAllWindows()
+
+def main():
+    """
+    Test the ScenePerception class with basic object detection.
+    Provides a simple command-line interface for testing different queries.
+    """
+    # Initialize perception system with visualization enabled
+    perception = ScenePerception(enable_visualization=True)
+    
+    try:
+        while True:
+            # Get user input for object detection
+            query = input("\nEnter object to detect (or 'quit' to exit): ").strip()
+            
+            if query.lower() == 'quit':
+                break
+                
+            # Attempt detection
+            print(f"\nDetecting: {query}")
+            result = perception.detect_object(query)
+            
+            # Display results
+            if result:
+                print("\nDetection Results:")
+                print(f"Label: {result['label']}")
+                print(f"Position (X,Y,Z): {result['position']}")
+                print(f"Bounding Box: {result['box']}")
+            else:
+                print(f"No {query} detected in scene.")
+                
+    except KeyboardInterrupt:
+        print("\nTest terminated by user")
+    finally:
+        # Clean up resources
+        perception.stop()
+        print("\nResources cleaned up")
+
+if __name__ == "__main__":
+    main()

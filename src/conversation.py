@@ -85,6 +85,8 @@ class ClaudeChat:
             {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 110, "delayAfter": 500}
         ]
 
+        (make sure to not add comments in between each command, because it will break my python code to proceses)
+
         Gripper open is 170 gripper all the way closed is 110 there is about 5 inches in between open and close and it interpolates lienarly between that.
 
         The twist servo is a rotation servo on a different place perpendicular to the other joints and it rotates the end effector. 

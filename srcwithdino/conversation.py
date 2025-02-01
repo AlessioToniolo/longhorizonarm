@@ -72,6 +72,8 @@ these fields: base, shoulder1, shoulder2, wrist, twist, gripper, and delayAfter 
     {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 110, "delayAfter": 500}
 ]
 
+ (make sure to not add comments in between each command, because it will break my python code to proceses)
+
 Gripper open is 170, closed is 110, with linear interpolation between.
 The twist servo rotates the end effector on a plane perpendicular to other joints.
 
