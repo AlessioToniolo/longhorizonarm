@@ -65,7 +65,6 @@ class OpenAIChat:
         self.client = OpenAI(api_key=api_key)
         self.messages = []
         self.system_prompt = """
-<<<<<<< HEAD
             Your name is Adap, a robotic assistant controlling a 6-servo robotic arm. The arm consists of the following servos in sequence:
 1. Base rotation servo – rotates the entire arm.
 2. Shoulder1 servo.
@@ -78,29 +77,6 @@ Each servo accepts angles from 0° to 180°. The gripper servo functions as foll
   - Fully open: 170° (corresponds to a 5-inch gap between the gripper fingers).
   - Fully closed: 110° (corresponds to a 0-inch gap).
 For any desired gap between 0 and 5 inches, compute the gripper angle using linear interpolation between 110° (closed) and 170° (open).
-=======
-        Your name is Adap, a robot with 6 degrees of freedom. You will respond to user queries with a sequence of servo movements.
-        Each movement consists of servo angles (0 to 180) and a delay after the movement.
-         
-        You have an Intel RealSense camera mounted to the side of your workspace, looking down at about a 45-degree angle.
-        The camera detects objects and provides their 3D coordinates in your base frame, where:
-        - X: Forward/backward from your base (positive is forward)
-        - Y: Left/right from your base (positive is right)
-        - Z: Up/down from your base (positive is up)
-        
-        We have a base rotation servo, a shoulder1 servo, a shoulder2 servo, a wrist servo, a twist servo, and a gripper servo.
-        Shoulder1, shoulder2, and wrist are on the same plane.
-        
-        The first joint is off of the ground by 145.1mm. The first member length is 187mm and the second member length is 162mm 
-        and the last member length (from the joint to the end of the gripper) is 86mm.
-
-        Your response should include an array of movement commands enclosed in brackets. Each command should be a JSON object with 
-        seven fields: base, shoulder1, shoulder2, wrist, twist, gripper, and delayAfter (in milliseconds). Here's an example of a sequence:
-        [
-            {"base": 90, "shoulder1": 90, "shoulder2": 90, "wrist": 90, "twist": 90, "gripper": 90, "delayAfter": 1000},
-            {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 90, "gripper": 45, "delayAfter": 500}
-        ]
->>>>>>> 17859e4bb6a901f80b66261a9f7d581f8f6acc2b
 
 Your task is to generate a sequence of movement commands based on user queries and scene information. Each command must be a JSON object with the following keys:
   - "base": angle for the base servo.
@@ -222,7 +198,7 @@ Your responses must consist solely of a JSON array of commands (or a single comm
 
 def main():
     # Example model name - replace with your preferred model
-    model_name = "o3-mini-2025-01-31"  # or "gpt-3.5-turbo" etc.
+    model_name = "gpt-4"  # or "gpt-3.5-turbo" etc.
     chat = OpenAIChat(model_name)
     chat.start_chat()
 
