@@ -6,12 +6,11 @@ import serial
 import sys
 import speech_recognition as sr
 from dotenv import load_dotenv
-from openai import OpenAI
+from anthropic import Anthropic
 from perception import ScenePerception
 
 load_dotenv()
 
-# VoiceRecognizer class remains unchanged
 class VoiceRecognizer:
     def __init__(self):
         self.recognizer = sr.Recognizer()
@@ -42,13 +41,12 @@ class VoiceRecognizer:
             print(f"Speech service error: {e}")
         return None
 
-class OpenAIChat:
-    def __init__(self, model_name):
-        api_key = os.getenv('OPENAI_API_KEY')
+class ClaudeChat:
+    def __init__(self):
+        api_key = os.getenv('ANTHROPIC_API_KEY')
         if not api_key:
-            raise ValueError("Missing OPENAI_API_KEY in .env file.")
+            raise ValueError("Missing ANTHROPIC_API_KEY in .env file.")
             
-        self.model_name = model_name
         self.voice_recognizer = VoiceRecognizer()
         self.scene_perception = ScenePerception(enable_visualization=True)
         self.last_scene_update = 0
@@ -62,52 +60,39 @@ class OpenAIChat:
             print(f"Serial error: {e}")
             raise
 
-        self.client = OpenAI(api_key=api_key)
+        self.client = Anthropic(api_key=api_key)
         self.messages = []
         self.system_prompt = """
-            Your name is Adap, a robotic assistant controlling a 6-servo robotic arm. The arm consists of the following servos in sequence:
-1. Base rotation servo – rotates the entire arm.
-2. Shoulder1 servo.
-3. Shoulder2 servo.
-4. Wrist servo.
-5. Twist servo – mounted after the wrist and rotates in the opposite direction.
-6. Gripper servo – controls the opening and closing of the gripper.
+ Your name is Adap, a robot with 4 degrees of freedom. You will respond to user queries with a sequence of servo movements.
+        Each movement consists of servo angles (0 to 180) and a delay after the movement.
+         
+        You have an Intel RealSense camera mounted to the side of your workspace, looking down at about a 45-degree angle.
+        The camera detects objects and provides their 3D coordinates in your base frame, where:
+        - X: Forward/backward from your base (positive is forward)
+        - Y: Left/right from your base (positive is right)
+        - Z: Up/down from your base (positive is up)
+        
+        We have a base rotation servo, a shoulder1 servo, a shoulder2 servo, a wrist servo, a twist servo, and a gripper servo.
+        Shoulder1, shoulder2, and wrist are on the same plane. Gripper is technically on the same plane as base, and twist is on a plane perp to the shoulder and wrist plane
+        
+        The first joint is off of the ground by 145.1mm. The first member length is 187mm and the second member length is 162mm 
+        and the last member length is 86mm.
 
-Each servo accepts angles from 0° to 180°. The gripper servo functions as follows:
-  - Fully open: 170° (corresponds to a 5-inch gap between the gripper fingers).
-  - Fully closed: 110° (corresponds to a 0-inch gap).
-For any desired gap between 0 and 5 inches, compute the gripper angle using linear interpolation between 110° (closed) and 170° (open).
+        Your response should include an array of movement commands enclosed in brackets. Each command should be a JSON object with 
+        five fields: base, shoulder1, shoulder2, wrist, and delayAfter (in milliseconds). Here's an example of a sequence:
+        [
+            {"base": 90, "shoulder1": 90, "shoulder2": 90, "wrist": 90, "twist": 90, "gripper": 170, "delayAfter": 1000},
+            {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 110, "delayAfter": 500}
+        ]
 
-Your task is to generate a sequence of movement commands based on user queries and scene information. Each command must be a JSON object with the following keys:
-  - "base": angle for the base servo.
-  - "shoulder1": angle for the first shoulder.
-  - "shoulder2": angle for the second shoulder.
-  - "wrist": angle for the wrist.
-  - "twist": angle for the twist servo.
-  - "gripper": angle for the gripper servo (calculated based on the desired gap).
-  - "delayAfter": delay (in milliseconds) after executing that command.
+        Gripper open is 170 gripper all the way closed is 110 there is about 5 inches in between open and close and it interpolates lienarly between that.
 
-For example:
-[
-  {"base": 90, "shoulder1": 90, "shoulder2": 90, "wrist": 90, "twist": 90, "gripper": 170, "delayAfter": 1000},
-  {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 140, "delayAfter": 500}
-]
+        The twist servo is a rotation servo on a different place perpendicular to the other joints and it rotates the end effector. 
 
-You have an Intel RealSense camera mounted on your end effector (the claw). This camera now provides a robot-centric view with the following coordinate system:
-  - X-axis: Points to the right (positive is right).
-  - Y-axis: Points downward (positive is down).
-  - Z-axis: Points forward (positive is forward).
-
-The camera returns object positions as 3D coordinates (X, Y, Z) in meters relative to its own frame—use these directly when planning your movements.
-
-Additionally, if you need to perform an on-demand vision scan without sending a command to the Arduino, output a special command:
-    {"command": "vision_scan"}
-This command will trigger the vision system to update object positions and detection scores.
-
-Your responses must consist solely of a JSON array of commands (or a single command for a vision scan) without any extra commentary. Follow the coordinate conventions and command format exactly, and include only the features currently needed.
-"""
+        When I ask about objects, you'll be given a list of detected objects with their positions. The camerta is mounted on the end effector so the reference of the camera is to your forward kinematics ending, all the way at the end effector is the cameras origin. do the calculations as you need for when picking up stuff.
+        Use these coordinates to plan your movements when interacting with objects."""
         # Initialize messages with system prompt
-        self.messages = [{"role": "system", "content": self.system_prompt}]
+        self.messages = []
 
     def get_scene_info(self):
         objects = self.scene_perception.get_scene_objects()
@@ -143,7 +128,7 @@ Your responses must consist solely of a JSON array of commands (or a single comm
         except Exception as e:
             print(f"Error sending command: {e}")
 
-    def process_openai_response(self, response_text):
+    def process_claude_response(self, response_text):
         try:
             start = response_text.find('[')
             end = response_text.rfind(']')
@@ -178,16 +163,16 @@ Your responses must consist solely of a JSON array of commands (or a single comm
             self.messages.append({"role": "user", "content": full_input})
             
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=self.messages,
+                response = self.client.messages.create(
+                    model="claude-3-5-sonnet-latest",
                     max_tokens=1024,
-                    temperature=0.7
+                    messages=self.messages,
+                    system=self.system_prompt
                 )
-                openai_response = response.choices[0].message.content
-                print("\nResponse:", openai_response)
-                self.process_openai_response(openai_response)
-                self.messages.append({"role": "assistant", "content": openai_response})
+                claude_response = response.content[0].text
+                print("\nResponse:", claude_response)
+                self.process_claude_response(claude_response)
+                self.messages.append({"role": "assistant", "content": claude_response})
             except Exception as e:
                 print("Error:", e)
                 print("Try again.")
@@ -197,9 +182,7 @@ Your responses must consist solely of a JSON array of commands (or a single comm
         self.serial.close()
 
 def main():
-    # Example model name - replace with your preferred model
-    model_name = "gpt-4"  # or "gpt-3.5-turbo" etc.
-    chat = OpenAIChat(model_name)
+    chat = ClaudeChat()
     chat.start_chat()
 
 if __name__ == "__main__":
