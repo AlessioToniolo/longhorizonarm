@@ -33,18 +33,18 @@ class ScenePerception:
         self.cy = 240.8659210205078
         
         # Fixed transform from camera to robot base
-        # Assuming camera is mounted 0.45m (1.5ft) to the side and looking down
-        # You'll need to adjust these values based on your actual setup
-        camera_x = 0.45  # 1.5 feet to the side (adjust sign based on which side)
-        camera_y = 0.45  # 1.5 feet up
-        camera_z = 0.0   # In line with robot base front/back
-        camera_tilt = np.radians(45)  # 45 degree downward tilt
+        inches_to_meters = 0.0254  # conversion factor
+        camera_x = 40 * inches_to_meters  # 25 inches in front
+        camera_y = 17.5 * inches_to_meters  # 17.5 inches up from ground
+        camera_z = 1 * inches_to_meters  # 1 inch offset from centerline
+        camera_tilt = np.radians(30)  # 30 degree downward tilt
         
         # Create transform matrix
+        # For a downward tilt around the X-axis, we rotate in the Y-Z plane
         self.T_cam_to_robot = np.array([
-            [np.cos(camera_tilt), 0, np.sin(camera_tilt), camera_x],
-            [0, 1, 0, camera_y],
-            [-np.sin(camera_tilt), 0, np.cos(camera_tilt), camera_z],
+            [1, 0, 0, camera_x],
+            [0, np.cos(camera_tilt), -np.sin(camera_tilt), camera_y],
+            [0, np.sin(camera_tilt), np.cos(camera_tilt), camera_z],
             [0, 0, 0, 1]
         ])
         
