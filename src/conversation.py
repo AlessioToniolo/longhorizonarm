@@ -1,209 +1,205 @@
-import speech_recognition as sr
 import os
 import json
-from anthropic import Anthropic
-from dotenv import load_dotenv
-import serial
 import time
 import threading
+import serial
 import sys
+import speech_recognition as sr
+from dotenv import load_dotenv
+from openai import OpenAI
 from perception import ScenePerception
 
 load_dotenv()
 
+# VoiceRecognizer class remains unchanged
 class VoiceRecognizer:
     def __init__(self):
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
-        self.is_listening = False
-        self.audio_data = None
-        
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(source)
-    
+        self.audio_data = None
+
     def capture_audio(self):
         with self.microphone as source:
             print("\nListening... (Press Enter to stop)")
             self.audio_data = self.recognizer.listen(source)
-    
+
     def listen(self):
         try:
-            audio_thread = threading.Thread(target=self.capture_audio)
-            audio_thread.start()
-            input()
-            audio_thread.join()
-            
+            thread = threading.Thread(target=self.capture_audio)
+            thread.start()
+            input()  # Stop listening when user presses Enter
+            thread.join()
             if self.audio_data:
                 print("Processing speech...")
                 text = self.recognizer.recognize_google(self.audio_data)
                 print(f"Recognized: {text}")
                 return text
-                
         except sr.UnknownValueError:
             print("Could not understand audio")
-            return None
         except sr.RequestError as e:
-            print(f"Could not request results; {e}")
-            return None
+            print(f"Speech service error: {e}")
+        return None
 
-class ClaudeChat:
-    def __init__(self):
-        api_key = os.getenv('ANTHROPIC_API_KEY')
+class OpenAIChat:
+    def __init__(self, model_name):
+        api_key = os.getenv('OPENAI_API_KEY')
         if not api_key:
-            raise ValueError("No API key found. Please check your .env file.")
-        
+            raise ValueError("Missing OPENAI_API_KEY in .env file.")
+            
+        self.model_name = model_name
         self.voice_recognizer = VoiceRecognizer()
         self.scene_perception = ScenePerception(enable_visualization=True)
-        
-        # Initialize scene caching
         self.last_scene_update = 0
-        self.last_scene_info = "No objects detected in the scene."
-        self.scene_cache_duration = 0.3  # 300ms cache duration
-        
+        self.last_scene_info = "No objects detected."
+        self.scene_cache_duration = 0.3  # seconds
+
         try:
             self.serial = serial.Serial('COM5', 115200, timeout=1)
             time.sleep(2)
         except serial.SerialException as e:
-            print(f"Error opening serial port: {e}")
+            print(f"Serial error: {e}")
             raise
 
-        self.client = Anthropic(api_key=api_key)
+        self.client = OpenAI(api_key=api_key)
         self.messages = []
         self.system_prompt = """
-        Your name is Adap, a robot with 4 degrees of freedom. You will respond to user queries with a sequence of servo movements.
-        Each movement consists of servo angles (0 to 180) and a delay after the movement.
-         
-        You have an Intel RealSense camera mounted to the side of your workspace, looking down at about a 45-degree angle.
-        The camera detects objects and provides their 3D coordinates in your base frame, where:
-        - X: Forward/backward from your base (positive is forward)
-        - Y: Left/right from your base (positive is right)
-        - Z: Up/down from your base (positive is up)
-        
-        We have a base rotation servo, a shoulder1 servo, a shoulder2 servo, and a wrist servo.
-        Shoulder1, shoulder2, and wrist are on the same plane.
-        
-        The first joint is off of the ground by 145.1mm. The first member length is 187mm and the second member length is 162mm 
-        and the last member length is 86mm.
+            Your name is Adap, a robotic assistant controlling a 6-servo robotic arm. The arm consists of the following servos in sequence:
+1. Base rotation servo – rotates the entire arm.
+2. Shoulder1 servo.
+3. Shoulder2 servo.
+4. Wrist servo.
+5. Twist servo – mounted after the wrist and rotates in the opposite direction.
+6. Gripper servo – controls the opening and closing of the gripper.
 
-        Your response should include an array of movement commands enclosed in brackets. Each command should be a JSON object with 
-        five fields: base, shoulder1, shoulder2, wrist, and delayAfter (in milliseconds). Here's an example of a sequence:
-        [
-            {"base": 90, "shoulder1": 90, "shoulder2": 90, "wrist": 90, "delayAfter": 1000},
-            {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "delayAfter": 500}
-        ]
+Each servo accepts angles from 0° to 180°. The gripper servo functions as follows:
+  - Fully open: 170° (corresponds to a 5-inch gap between the gripper fingers).
+  - Fully closed: 110° (corresponds to a 0-inch gap).
+For any desired gap between 0 and 5 inches, compute the gripper angle using linear interpolation between 110° (closed) and 170° (open).
 
-        When I ask about objects, you'll be given a list of detected objects with their positions in your base frame.
-        Use these coordinates to plan your movements when interacting with objects.
-        """
+Your task is to generate a sequence of movement commands based on user queries and scene information. Each command must be a JSON object with the following keys:
+  - "base": angle for the base servo.
+  - "shoulder1": angle for the first shoulder.
+  - "shoulder2": angle for the second shoulder.
+  - "wrist": angle for the wrist.
+  - "twist": angle for the twist servo.
+  - "gripper": angle for the gripper servo (calculated based on the desired gap).
+  - "delayAfter": delay (in milliseconds) after executing that command.
+
+For example:
+[
+  {"base": 90, "shoulder1": 90, "shoulder2": 90, "wrist": 90, "twist": 90, "gripper": 170, "delayAfter": 1000},
+  {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 140, "delayAfter": 500}
+]
+
+You have an Intel RealSense camera mounted on your end effector (the claw). This camera now provides a robot-centric view with the following coordinate system:
+  - X-axis: Points to the right (positive is right).
+  - Y-axis: Points downward (positive is down).
+  - Z-axis: Points forward (positive is forward).
+
+The camera returns object positions as 3D coordinates (X, Y, Z) in meters relative to its own frame—use these directly when planning your movements.
+
+Additionally, if you need to perform an on-demand vision scan without sending a command to the Arduino, output a special command:
+    {"command": "vision_scan"}
+This command will trigger the vision system to update object positions and detection scores.
+
+Your responses must consist solely of a JSON array of commands (or a single command for a vision scan) without any extra commentary. Follow the coordinate conventions and command format exactly, and include only the features currently needed.
+"""
+        # Initialize messages with system prompt
+        self.messages = [{"role": "system", "content": self.system_prompt}]
 
     def get_scene_info(self):
-        """Get raw scene information from perception system"""
         objects = self.scene_perception.get_scene_objects()
         if not objects:
-            return "No objects currently detected in the scene."
-        
-        scene_desc = "\nCurrently detected objects in the scene:\n"
+            return "No objects detected."
+        desc = "Detected objects:\n"
         for obj in objects:
             x, y, z = obj['position']
-            scene_desc += f"- {obj['label']} (confidence: {obj['score']:.2f})\n"
-            scene_desc += f"  Position: X={x:.3f}m (forward/back), Y={y:.3f}m (left/right), Z={z:.3f}m (up/down)\n"
-        return scene_desc
+            desc += f"- {obj['label']} (score: {obj['score']:.2f}) at X:{x:.3f}, Y:{y:.3f}, Z:{z:.3f}\n"
+        return desc
 
     def get_current_scene(self):
-        """Get scene info with caching for better performance"""
-        current_time = time.time()
-        # Only update if cache duration has passed
-        if current_time - self.last_scene_update > self.scene_cache_duration:
+        now = time.time()
+        if now - self.last_scene_update > self.scene_cache_duration:
             self.last_scene_info = self.get_scene_info()
-            self.last_scene_update = current_time
+            self.last_scene_update = now
         return self.last_scene_info
 
     def send_command(self, command):
+        if command.get("command") == "vision_scan":
+            print("Performing vision scan...")
+            objects = self.scene_perception.get_scene_objects()
+            if not objects:
+                print("No objects detected.")
+            else:
+                for obj in objects:
+                    print(f"{obj['label']} at {obj['position']}")
+            return
+
         try:
             self.serial.write(json.dumps(command).encode() + b'\n')
-            time.sleep(command.get('delayAfter', 0) / 1000)  # Convert ms to seconds
+            time.sleep(command.get('delayAfter', 0) / 1000)
         except Exception as e:
             print(f"Error sending command: {e}")
 
-    def process_claude_response(self, response_text):
+    def process_openai_response(self, response_text):
         try:
-            # Find the array of commands between square brackets
             start = response_text.find('[')
             end = response_text.rfind(']')
-            
             if start != -1 and end != -1:
-                json_str = response_text[start:end + 1]
-                commands = json.loads(json_str)
-                
-                if isinstance(commands, list):
-                    print(f"Executing {len(commands)} commands...")
-                    for command in commands:
-                        print(f"Command: {command}")
-                        self.send_command(command)
+                command_list = json.loads(response_text[start:end+1])
+                if isinstance(command_list, list):
+                    print(f"Executing {len(command_list)} commands...")
+                    for cmd in command_list:
+                        print(f"Command: {cmd}")
+                        self.send_command(cmd)
                 else:
-                    print("Invalid command format - expected an array of commands")
+                    print("Response is not a list.")
             else:
-                print("No valid commands found in response")
-                
-        except json.JSONDecodeError as e:
-            print(f"Error parsing JSON commands: {e}")
+                print("No valid commands found in response.")
         except Exception as e:
             print(f"Error processing response: {e}")
 
     def start_chat(self):
-        print("Chat started with our robot assistant.")
-        print("Say 'quit' or type 'q' to end the conversation.")
-        print("Say 'type' or press Enter for keyboard input.")
-        print("---------------------------------------------")
+        print("Chat started. Say 'quit' or 'q' to exit.")
+        print("Press Enter for keyboard input.")
+        while True:
+            print("\nPress Enter to type or speak:")
+            choice = input().strip().lower()
+            if choice == "q":
+                break
+            user_input = input("Type your message: ").strip() if choice else self.voice_recognizer.listen()
+            if not user_input or user_input.lower() in ["quit", "q"]:
+                break
 
-        try:
-            while True:
-                print("\nPress Enter to type, or just start speaking:")
-                key_input = input().strip().lower()
+            scene_info = self.get_current_scene()
+            full_input = f"{user_input}\n\n{scene_info}"
+            self.messages.append({"role": "user", "content": full_input})
+            
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=self.messages,
+                    max_tokens=1024,
+                    temperature=0.7
+                )
+                openai_response = response.choices[0].message.content
+                print("\nResponse:", openai_response)
+                self.process_openai_response(openai_response)
+                self.messages.append({"role": "assistant", "content": openai_response})
+            except Exception as e:
+                print("Error:", e)
+                print("Try again.")
                 
-                if key_input == "q":
-                    break
-                    
-                if key_input:
-                    user_input = input("Type your message: ").strip()
-                else:
-                    user_input = self.voice_recognizer.listen()
-                    
-                if not user_input or user_input.lower() in ['quit', 'q']:
-                    break
+        print("Ending chat...")
+        self.scene_perception.stop()
+        self.serial.close()
 
-                # Get cached scene information
-                scene_info = self.get_current_scene()
-                
-                # Combine user input with scene information
-                full_input = f"{user_input}\n\n{scene_info}"
-                self.messages.append({"role": "user", "content": full_input})
-
-                try:
-                    response = self.client.messages.create(
-                        model="claude-3-5-sonnet-latest",
-                        max_tokens=1024,
-                        system=self.system_prompt,
-                        messages=self.messages
-                    )
-
-                    claude_response = response.content[0].text
-                    print("\nProcessing commands:", claude_response)
-
-                    self.process_claude_response(claude_response)
-                    self.messages.append({"role": "assistant", "content": claude_response})
-
-                except Exception as e:
-                    print(f"\nError: {str(e)}")
-                    print("Please try again.")
-
-        finally:
-            print("\nEnding chat session...")
-            self.scene_perception.stop()
-            self.serial.close()
-    
 def main():
-    chat = ClaudeChat()
+    # Example model name - replace with your preferred model
+    model_name = "o3-mini-2025-01-31"  # or "gpt-3.5-turbo" etc.
+    chat = OpenAIChat(model_name)
     chat.start_chat()
 
 if __name__ == "__main__":
