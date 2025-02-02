@@ -2,7 +2,7 @@ import pyrealsense2 as rs
 import numpy as np
 import cv2
 import torch
-from transformers import pipeline
+from transformers import pipeline, SamModel, SamProcessor
 from typing import List, Dict, Tuple, Optional
 
 class CameraInterface:
@@ -59,9 +59,13 @@ class VLModel:
         self.detector = pipeline("object-detection", 
                                model="IDEA-Research/GroundingDINO-T",
                                device=self.device)
+        
+        # Initialize SAM
+        self.sam_model = SamModel.from_pretrained("facebook/sam-vit-huge").to(self.device)
+        self.sam_processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
 
     def detect_objects(self, image: np.ndarray, text_prompt: str = None) -> List[Dict]:
-        """Detects objects in the image using GroundingDINO"""
+        """Detects objects in the image using GroundingDINO and generates masks using SAM"""
         # Convert BGR to RGB
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
@@ -71,7 +75,7 @@ class VLModel:
         else:
             detections = self.detector(image_rgb)
             
-        # Convert detections to our format
+        # Process each detection with SAM
         results = []
         for det in detections:
             box = [
@@ -80,10 +84,27 @@ class VLModel:
                 det['box']['xmax'],
                 det['box']['ymax']
             ]
+            
+            # Generate mask using SAM
+            inputs = self.sam_processor(
+                image_rgb,
+                input_boxes=[[box]],
+                return_tensors="pt"
+            ).to(self.device)
+            
+            with torch.no_grad():
+                outputs = self.sam_model(**inputs)
+                masks = outputs.pred_masks.squeeze(1)
+                scores = outputs.iou_scores
+            
+            # Convert mask to numpy
+            mask = masks[0].cpu().numpy()
+            
             results.append({
                 'label': det['label'],
                 'score': det['score'],
-                'box': box
+                'box': box,
+                'mask': mask
             })
             
         return results
@@ -101,7 +122,7 @@ class ScenePerception:
         """Returns all detected objects in the current scene"""
         color_image, depth_image = self.camera.get_frames()
         
-        # Get detections
+        # Get detections and masks
         detections = self.vlm.detect_objects(color_image, text_prompt)
         
         # Process detections
@@ -120,7 +141,8 @@ class ScenePerception:
                 'label': det['label'],
                 'score': det['score'],
                 'position': position,
-                'box': [x1, y1, x2, y2]
+                'box': [x1, y1, x2, y2],
+                'mask': det['mask']
             })
         
         self.current_objects = objects
@@ -140,31 +162,69 @@ class ScenePerception:
 
     def _visualize(self, color_image: np.ndarray, depth_image: np.ndarray, 
                   objects: List[Dict]):
-        """Visualizes detections and depth map"""
-        vis = color_image.copy()
+        """Visualizes detections, segmentation masks, and depth map"""
+        # Create copies for different visualizations
+        bbox_vis = color_image.copy()
+        mask_vis = color_image.copy()
+        combined_vis = color_image.copy()
         
-        # Draw detections
-        for obj in objects:
-            x1, y1, x2, y2 = obj['box']
+        # Create a combined mask for all objects
+        combined_mask = np.zeros_like(color_image)
+        
+        # Generate random colors for each object
+        colors = [(np.random.randint(0, 255), 
+                  np.random.randint(0, 255), 
+                  np.random.randint(0, 255)) for _ in objects]
+        
+        for obj, color in zip(objects, colors):
+            x1, y1, x2, y2 = map(int, obj['box'])
+            
             # Draw bounding box
-            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.rectangle(bbox_vis, (x1, y1), (x2, y2), color, 2)
+            cv2.rectangle(combined_vis, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw mask if available
+            if 'mask' in obj:
+                # Convert binary mask to BGR
+                mask = obj['mask'].astype(np.uint8)
+                colored_mask = np.zeros_like(color_image)
+                colored_mask[mask > 0] = color
+                
+                # Add mask to visualizations
+                mask_vis = cv2.addWeighted(mask_vis, 1, colored_mask, 0.5, 0)
+                combined_vis = cv2.addWeighted(combined_vis, 1, colored_mask, 0.3, 0)
+                combined_mask = cv2.addWeighted(combined_mask, 1, colored_mask, 1, 0)
             
             # Add labels
             label = f"{obj['label']} ({obj['score']:.2f})"
             pos = obj['position']
             coords = f"X:{pos[0]:.2f} Y:{pos[1]:.2f} Z:{pos[2]:.2f}"
-            cv2.putText(vis, label, (x1, y1 - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            cv2.putText(vis, coords, (x1, y1 + 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
+            # Add text to both bbox and combined visualizations
+            for vis in [bbox_vis, combined_vis]:
+                cv2.putText(vis, label, (x1, y1 - 10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                cv2.putText(vis, coords, (x1, y1 + 20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         
-        # Show depth map
+        # Create depth visualization
         depth_vis = cv2.applyColorMap(
             cv2.convertScaleAbs(depth_image, alpha=0.03),
             cv2.COLORMAP_JET
         )
         
-        cv2.imshow("Detections", vis)
+        # Add mask contours to depth visualization
+        if combined_mask.any():
+            mask_gray = cv2.cvtColor(combined_mask, cv2.COLOR_BGR2GRAY)
+            contours, _ = cv2.findContours(mask_gray, 
+                                         cv2.RETR_EXTERNAL, 
+                                         cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(depth_vis, contours, -1, (0, 255, 0), 2)
+        
+        # Show all visualizations
+        cv2.imshow("Bounding Boxes", bbox_vis)
+        cv2.imshow("Segmentation Masks", mask_vis)
+        cv2.imshow("Combined View", combined_vis)
         cv2.imshow("Depth Map", depth_vis)
         cv2.waitKey(1)
 
