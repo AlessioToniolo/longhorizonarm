@@ -8,7 +8,6 @@ import speech_recognition as sr
 from dotenv import load_dotenv
 from anthropic import Anthropic
 from perception import ScenePerception
-from preset import RobotPreset
 
 load_dotenv()
 
@@ -44,64 +43,23 @@ class VoiceRecognizer:
 
 class ClaudeChat:
     def __init__(self):
-        self._init_apis()
-        self._run_presets()  # Run presets before initializing hardware
-        time.sleep(1)  # Small delay to ensure port is fully released
-        self._init_hardware()
-        self.messages = []
-        self.system_prompt = """
-Your name is Adap, a robot with 4 degrees of freedom. You will respond to user queries with a sequence of servo movements.
-Each movement consists of servo angles (0 to 180) and a delay after the movement.
-         
-You have an Intel RealSense camera mounted to the side of your workspace, looking down at about a 45-degree angle.
-The camera detects objects and provides their 3D coordinates in your base frame, where:
-- X: Forward/backward from your base (positive is forward)
-- Y: Left/right from your base (positive is right)
-- Z: Up/down from your base (positive is up)
-
-We have a base rotation servo, a shoulder1 servo, a shoulder2 servo, a wrist servo, a twist servo, and a gripper servo.
-Shoulder1, shoulder2, and wrist are on the same plane. Gripper is technically on the same plane as base, and twist is on a plane perpendicular to the shoulder and wrist plane.
-
-The first joint is off of the ground by 145.1mm. The first member length is 187mm and the second member length is 162mm 
-and the last member length is 86mm.
-
-You can search for specific objects by describing them in natural language. When you receive a query about an object,
-the system will try to locate it and provide its 3D coordinates if found.
-
-Your response should include an array of movement commands enclosed in brackets. Each command should be a JSON object with 
-these fields: base, shoulder1, shoulder2, wrist, twist, gripper, and delayAfter (in milliseconds). Example:
-[
-    {"base": 90, "shoulder1": 90, "shoulder2": 90, "wrist": 90, "twist": 90, "gripper": 170, "delayAfter": 1000},
-    {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 110, "delayAfter": 500}
-]
-
-Gripper open is 170, closed is 110, with linear interpolation between.
-The twist servo rotates the end effector on a plane perpendicular to other joints.
-
-When asked about objects, you'll receive information about the specific object detected, including its 3D position.
-The camera is mounted on the end effector, so coordinates are relative to your end effector position."""
-
-    def _init_apis(self):
-        """Initialize API clients"""
         api_key = os.getenv('ANTHROPIC_API_KEY')
         if not api_key:
-            raise ValueError("Missing ANTHROPIC_API_KEY in .env file")
-        self.client = Anthropic(api_key=api_key)
+            raise ValueError("Missing ANTHROPIC_API_KEY in .env file.")
+           
         self.voice_recognizer = VoiceRecognizer()
         self.scene_perception = ScenePerception(enable_visualization=True)
+        self.last_scene_update = 0
+        self.last_scene_info = "No objects detected."
+        self.scene_cache_duration = 0.3  # seconds
 
-    def _run_presets(self):
-        """Initialize and run robot presets"""
-        try:
-            preset_handler = RobotPreset()
-            preset_handler.run_preset_sequence()
-            # Connection is automatically closed in run_preset_sequence
-        except Exception as e:
-            print(f"Error running presets: {e}")
-            raise
+        # PRESET INIT
+        """
+        self.robot_preset = RobotPreset()
+        self.robot_preset.run_preset_sequence()
+        self.robot_preset.close()
+        """
 
-    def _init_hardware(self):
-        """Initialize serial connection"""
         try:
             self.serial = serial.Serial('COM5', 115200, timeout=1)
             time.sleep(2)
@@ -109,29 +67,92 @@ The camera is mounted on the end effector, so coordinates are relative to your e
             print(f"Serial error: {e}")
             raise
 
-    def _extract_object_query(self, user_input):
-        """Extract object query from user input"""
-        keywords = ["find", "look for", "locate", "where is", "search for", "detect"]
-        for keyword in keywords:
-            if keyword in user_input.lower():
-                query = user_input.lower().split(keyword)[-1].strip()
-                return query
-        return None
+        print("RUNNING PRESET!!!")
+        self.send_command({
+                    "base": 90,
+                    "shoulder1": 60,
+                    "shoulder2": 20,
+                    "wrist": 142,
+                    "twist": 5,
+                    "gripper": 140,
+                    "delayAfter": 1000
+                })
 
-    def get_scene_info(self, query=None):
-        """Get scene information for a specific query"""
-        if not query:
-            return "No specific object queried."
-            
-        detected_object = self.scene_perception.detect_object(query)
-        if not detected_object:
-            return f"Could not find {query} in the scene."
-            
-        x, y, z = detected_object['position']
-        return f"Found {query} (confidence: {detected_object['confidence']:.2f}) at X:{x:.3f}, Y:{y:.3f}, Z:{z:.3f}"
+        self.client = Anthropic(api_key=api_key)
+        self.messages = []
+        self.system_prompt = """
+You are a robot with 5 degrees of freedom (not counting claw). You will respond to user queries and generate a sequence of servo angle movements, calculating inverse kinematics as needed
+        Each movement consists of servo angles (0 to 180) and a delay after the movement.
+         
+        You will start at the following position everytime when the chat begins:
+
+        {
+            "base": 90,
+            "shoulder1": 60,
+            "shoulder2": 20,
+            "wrist": 142,
+            "twist": 5,
+            "gripper": 140,
+            "delayAfter": 1000
+        }
+
+        You have an Intel RealSense camera mounted to your end effector, looking down at about a 45-degree angle.
+        The camera detects objects and provides their 3D coordinates in your base frame (so relative to the robot origin in the center axis at the bottom of the base joint on the ground), where:
+        - X: Forward/backward from your base (positive is forward)
+        - Y: Left/right from your base (positive is left)
+        - Z: Up/down from your base (positive is up)
+       
+        We have a base rotation servo, a shoulder1 servo, a shoulder2 servo, a wrist servo, a twist servo, and a gripper servo.
+        Shoulder1, shoulder2, and wrist are on the same plane. Gripper is technically on the same plane as base, and twist is on a plane perp to the shoulder and wrist plane
+       
+        The first joint is off of the ground by 145.1mm. The first member length is 187mm and the second member length is 162mm
+        and the last member length is 86mm.
+
+        Your response should include an array of movement command(s) enclosed in brackets. Each command should be a JSON object with
+        five fields: base, shoulder1, shoulder2, wrist, and delayAfter (in milliseconds). You can do multiple. Here's an example of a sequence:
+        [
+            {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 110, "delayAfter": 500},
+        ]
+
+        DO NOT PUT COMMENDS IN BETWEEN OBJECTS. I REPEAT, NO COMMENTS ANYWHERE> THIS WILL MESS UP MY CODe
+
+        Gripper open is 170 gripper all the way closed is 100 there is about 5 inches in between open and close and it interpolates lienarly between that.
+
+        The twist servo is a rotation servo on a different place perpendicular to the other joints and it rotates the end effector.
+
+        When I ask about objects, you'll be given a list of detected objects with their positions. The camerta is mounted on the end effector so the reference of the camera is to your forward kinematics ending, all the way at the end effector is the cameras origin. do the calculations as you need for when picking up stuff.
+        Use these coordinates to plan your movements when interacting with objects."""
+        # Initialize messages with system prompt
+        self.messages = []
+
+    def get_scene_info(self):
+        objects = self.scene_perception.get_scene_objects()
+        if not objects:
+            return "No objects detected."
+        desc = "Detected objects:\n"
+        for obj in objects:
+            x, y, z = obj['position']
+            desc += f"- {obj['label']} (score: {obj['score']:.2f}) at X:{x:.3f}, Y:{y:.3f}, Z:{z:.3f}\n"
+        return desc
+
+    def get_current_scene(self):
+        now = time.time()
+        if now - self.last_scene_update > self.scene_cache_duration:
+            self.last_scene_info = self.get_scene_info()
+            self.last_scene_update = now
+        return self.last_scene_info
 
     def send_command(self, command):
-        """Send movement command to robot"""
+        if command.get("command") == "vision_scan":
+            print("Performing vision scan...")
+            objects = self.scene_perception.get_scene_objects()
+            if not objects:
+                print("No objects detected.")
+            else:
+                for obj in objects:
+                    print(f"{obj['label']} at {obj['position']}")
+            return
+
         try:
             self.serial.write(json.dumps(command).encode() + b'\n')
             time.sleep(command.get('delayAfter', 0) / 1000)
@@ -139,7 +160,6 @@ The camera is mounted on the end effector, so coordinates are relative to your e
             print(f"Error sending command: {e}")
 
     def process_claude_response(self, response_text):
-        """Process and execute Claude's movement commands"""
         try:
             start = response_text.find('[')
             end = response_text.rfind(']')
@@ -158,30 +178,24 @@ The camera is mounted on the end effector, so coordinates are relative to your e
             print(f"Error processing response: {e}")
 
     def start_chat(self):
-        """Start the interactive chat session"""
         print("Chat started. Say 'quit' or 'q' to exit.")
         print("Press Enter for keyboard input.")
-        
         while True:
             print("\nPress Enter to type or speak:")
             choice = input().strip().lower()
             if choice == "q":
                 break
-                
             user_input = input("Type your message: ").strip() if choice else self.voice_recognizer.listen()
             if not user_input or user_input.lower() in ["quit", "q"]:
                 break
 
-            # Extract object query and get scene info if applicable
-            query = self._extract_object_query(user_input)
-            scene_info = self.get_scene_info(query) if query else "No specific object queried."
-            
+            scene_info = self.get_current_scene()
             full_input = f"{user_input}\n\n{scene_info}"
             self.messages.append({"role": "user", "content": full_input})
-            
+           
             try:
                 response = self.client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                    model="claude-3-5-sonnet-latest",
                     max_tokens=1024,
                     messages=self.messages,
                     system=self.system_prompt
@@ -193,7 +207,7 @@ The camera is mounted on the end effector, so coordinates are relative to your e
             except Exception as e:
                 print("Error:", e)
                 print("Try again.")
-                
+               
         print("Ending chat...")
         self.scene_perception.stop()
         self.serial.close()
