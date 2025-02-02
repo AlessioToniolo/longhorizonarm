@@ -1,16 +1,7 @@
 numpy
-scipy
-Jetson.GPIO
 opencv-python
 torch
-torchvision
 transformers
-groundingdino-py
-python-dotenv
-pytest
 pyrealsense2
-ompl
-open3d
-ikpy
 python-dotenv
 anthropic
