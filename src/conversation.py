@@ -1,65 +1,107 @@
 import os
 import json
 import time
-import threading
 import serial
 import sys
-import speech_recognition as sr
 from dotenv import load_dotenv
 from anthropic import Anthropic
 from perception import ScenePerception
 
 load_dotenv()
 
-class VoiceRecognizer:
+class RobotChat:
     def __init__(self):
-        self.recognizer = sr.Recognizer()
-        self.microphone = sr.Microphone()
-        with self.microphone as source:
-            self.recognizer.adjust_for_ambient_noise(source)
-        self.audio_data = None
+        self._init_apis()
+        self._init_hardware()
+        self.messages = []
+        self.system_prompt = """
+Your name is Adap, a robot with 4 degrees of freedom. You will respond to user queries with a sequence of servo movements.
+Each movement consists of servo angles (0 to 180) and a delay after the movement.
+         
+You have an Intel RealSense camera mounted to the side of your workspace, looking down at about a 45-degree angle.
+The camera detects objects and provides their 3D coordinates in your base frame, where:
+- X: Forward/backward from your base (positive is forward)
+- Y: Left/right from your base (positive is right)
+- Z: Up/down from your base (positive is up)
 
-    def capture_audio(self):
-        with self.microphone as source:
-            print("\nListening... (Press Enter to stop)")
-            self.audio_data = self.recognizer.listen(source)
+We have a base rotation servo, a shoulder1 servo, a shoulder2 servo, a wrist servo, a twist servo, and a gripper servo.
+Shoulder1, shoulder2, and wrist are on the same plane. Gripper is technically on the same plane as base, and twist is on a plane perpendicular to the shoulder and wrist plane.
 
-    def listen(self):
-        try:
-            thread = threading.Thread(target=self.capture_audio)
-            thread.start()
-            input()  # Stop listening when user presses Enter
-            thread.join()
-            if self.audio_data:
-                print("Processing speech...")
-                text = self.recognizer.recognize_google(self.audio_data)
-                print(f"Recognized: {text}")
-                return text
-        except sr.UnknownValueError:
-            print("Could not understand audio")
-        except sr.RequestError as e:
-            print(f"Speech service error: {e}")
-        return None
+The first joint is off of the ground by 145.1mm. The first member length is 187mm and the second member length is 162mm 
+and the last member length is 86mm.
 
-class ClaudeChat:
-    def __init__(self):
+You can search for specific objects by describing them in natural language. When you receive a query about an object,
+the system will try to locate it and provide its 3D coordinates if found.
+
+Your response should include an array of movement commands enclosed in brackets. Each command should be a JSON object with 
+these fields: base, shoulder1, shoulder2, wrist, twist, gripper, and delayAfter (in milliseconds). Example:
+[
+    {"base": 90, "shoulder1": 90, "shoulder2": 90, "wrist": 90, "twist": 90, "gripper": 170, "delayAfter": 1000},
+    {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 110, "delayAfter": 500}
+]
+
+(make sure to not add comments in between each command, because it will break my python code to process)
+
+Gripper open is 170, closed is 110, with linear interpolation between.
+The twist servo rotates the end effector on a plane perpendicular to other joints.
+
+When asked about objects, you'll receive information about the specific object detected, including its 3D position.
+The camera is mounted on the end effector, so coordinates are relative to your end effector position."""
+
+        self.query_extraction_prompt = """You are a natural language processing expert focused on extracting object queries from user input. Your task is to identify if a user is asking about finding, locating, or interacting with an object, and extract the object description.
+
+Rules:
+1. If the user is asking about finding or interacting with an object, return a JSON object with:
+   - "has_query": true
+   - "object_description": detailed description of the object
+   - "action": the intended action (find, pick up, move, etc.)
+2. If the user is not asking about an object, return:
+   - "has_query": false
+   - "object_description": null
+   - "action": null
+
+Examples:
+
+Input: "Can you find the blue coffee mug?"
+Output: {
+    "has_query": true,
+    "object_description": "blue coffee mug",
+    "action": "find"
+}
+
+Input: "Pick up the red pen next to the notebook"
+Output: {
+    "has_query": true,
+    "object_description": "red pen near notebook",
+    "action": "pick up"
+}
+
+Input: "Wave hello"
+Output: {
+    "has_query": false,
+    "object_description": null,
+    "action": null
+}
+
+Input: "Move your base joint to 90 degrees"
+Output: {
+    "has_query": false,
+    "object_description": null,
+    "action": null
+}
+
+Respond only with the JSON object, no additional text or explanation."""
+
+    def _init_apis(self):
+        """Initialize API clients and perception system"""
         api_key = os.getenv('ANTHROPIC_API_KEY')
         if not api_key:
-            raise ValueError("Missing ANTHROPIC_API_KEY in .env file.")
-           
-        self.voice_recognizer = VoiceRecognizer()
+            raise ValueError("Missing ANTHROPIC_API_KEY in .env file")
+        self.client = Anthropic(api_key=api_key)
         self.scene_perception = ScenePerception(enable_visualization=True)
-        self.last_scene_update = 0
-        self.last_scene_info = "No objects detected."
-        self.scene_cache_duration = 0.3  # seconds
 
-        # PRESET INIT
-        """
-        self.robot_preset = RobotPreset()
-        self.robot_preset.run_preset_sequence()
-        self.robot_preset.close()
-        """
-
+    def _init_hardware(self):
+        """Initialize serial connection"""
         try:
             self.serial = serial.Serial('COM5', 115200, timeout=1)
             time.sleep(2)
@@ -67,92 +109,48 @@ class ClaudeChat:
             print(f"Serial error: {e}")
             raise
 
-        print("RUNNING PRESET!!!")
-        self.send_command({
-                    "base": 90,
-                    "shoulder1": 60,
-                    "shoulder2": 20,
-                    "wrist": 142,
-                    "twist": 5,
-                    "gripper": 140,
-                    "delayAfter": 1000
-                })
+    def _extract_object_query(self, user_input):
+        """Extract object query from user input using Claude's NLP capabilities"""
+        try:
+            # Get NLP analysis from Claude
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=150,  # Small response size since we only need the JSON
+                messages=[{
+                    "role": "user",
+                    "content": user_input
+                }],
+                system=self.query_extraction_prompt
+            )
+            
+            # Parse the response
+            try:
+                result = json.loads(response.content[0].text)
+                if result["has_query"]:
+                    return result["object_description"]
+                return None
+            except json.JSONDecodeError:
+                print("Error parsing Claude's query extraction response")
+                return None
+                
+        except Exception as e:
+            print(f"Error in query extraction: {e}")
+            return None
 
-        self.client = Anthropic(api_key=api_key)
-        self.messages = []
-        self.system_prompt = """
-You are a robot with 5 degrees of freedom (not counting claw). You will respond to user queries and generate a sequence of servo angle movements, calculating inverse kinematics as needed
-        Each movement consists of servo angles (0 to 180) and a delay after the movement.
-         
-        You will start at the following position everytime when the chat begins:
-
-        {
-            "base": 90,
-            "shoulder1": 60,
-            "shoulder2": 20,
-            "wrist": 142,
-            "twist": 5,
-            "gripper": 140,
-            "delayAfter": 1000
-        }
-
-        You have an Intel RealSense camera mounted to your end effector, looking down at about a 45-degree angle.
-        The camera detects objects and provides their 3D coordinates in your base frame (so relative to the robot origin in the center axis at the bottom of the base joint on the ground), where:
-        - X: Forward/backward from your base (positive is forward)
-        - Y: Left/right from your base (positive is left)
-        - Z: Up/down from your base (positive is up)
-       
-        We have a base rotation servo, a shoulder1 servo, a shoulder2 servo, a wrist servo, a twist servo, and a gripper servo.
-        Shoulder1, shoulder2, and wrist are on the same plane. Gripper is technically on the same plane as base, and twist is on a plane perp to the shoulder and wrist plane
-       
-        The first joint is off of the ground by 145.1mm. The first member length is 187mm and the second member length is 162mm
-        and the last member length is 86mm.
-
-        Your response should include an array of movement command(s) enclosed in brackets. Each command should be a JSON object with
-        five fields: base, shoulder1, shoulder2, wrist, and delayAfter (in milliseconds). You can do multiple. Here's an example of a sequence:
-        [
-            {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 110, "delayAfter": 500},
-        ]
-
-        DO NOT PUT COMMENDS IN BETWEEN OBJECTS. I REPEAT, NO COMMENTS ANYWHERE> THIS WILL MESS UP MY CODe
-
-        Gripper open is 170 gripper all the way closed is 100 there is about 5 inches in between open and close and it interpolates lienarly between that.
-
-        The twist servo is a rotation servo on a different place perpendicular to the other joints and it rotates the end effector.
-
-        When I ask about objects, you'll be given a list of detected objects with their positions. The camerta is mounted on the end effector so the reference of the camera is to your forward kinematics ending, all the way at the end effector is the cameras origin. do the calculations as you need for when picking up stuff.
-        Use these coordinates to plan your movements when interacting with objects."""
-        # Initialize messages with system prompt
-        self.messages = []
-
-    def get_scene_info(self):
-        objects = self.scene_perception.get_scene_objects()
-        if not objects:
-            return "No objects detected."
-        desc = "Detected objects:\n"
-        for obj in objects:
-            x, y, z = obj['position']
-            desc += f"- {obj['label']} (score: {obj['score']:.2f}) at X:{x:.3f}, Y:{y:.3f}, Z:{z:.3f}\n"
-        return desc
-
-    def get_current_scene(self):
-        now = time.time()
-        if now - self.last_scene_update > self.scene_cache_duration:
-            self.last_scene_info = self.get_scene_info()
-            self.last_scene_update = now
-        return self.last_scene_info
+    def get_scene_info(self, query=None):
+        """Get scene information for a specific query"""
+        if not query:
+            return "No specific object queried."
+            
+        detected_object = self.scene_perception.find_object(query)
+        if not detected_object:
+            return f"Could not find {query} in the scene."
+            
+        x, y, z = detected_object['position']
+        return f"Found {query} (confidence: {detected_object['score']:.2f}) at X:{x:.3f}, Y:{y:.3f}, Z:{z:.3f}"
 
     def send_command(self, command):
-        if command.get("command") == "vision_scan":
-            print("Performing vision scan...")
-            objects = self.scene_perception.get_scene_objects()
-            if not objects:
-                print("No objects detected.")
-            else:
-                for obj in objects:
-                    print(f"{obj['label']} at {obj['position']}")
-            return
-
+        """Send movement command to robot"""
         try:
             self.serial.write(json.dumps(command).encode() + b'\n')
             time.sleep(command.get('delayAfter', 0) / 1000)
@@ -160,6 +158,7 @@ You are a robot with 5 degrees of freedom (not counting claw). You will respond 
             print(f"Error sending command: {e}")
 
     def process_claude_response(self, response_text):
+        """Process and execute Claude's movement commands"""
         try:
             start = response_text.find('[')
             end = response_text.rfind(']')
@@ -178,24 +177,24 @@ You are a robot with 5 degrees of freedom (not counting claw). You will respond 
             print(f"Error processing response: {e}")
 
     def start_chat(self):
-        print("Chat started. Say 'quit' or 'q' to exit.")
-        print("Press Enter for keyboard input.")
+        """Start the interactive chat session"""
+        print("Chat started. Type 'quit' or 'q' to exit.")
+        
         while True:
-            print("\nPress Enter to type or speak:")
-            choice = input().strip().lower()
-            if choice == "q":
-                break
-            user_input = input("Type your message: ").strip() if choice else self.voice_recognizer.listen()
-            if not user_input or user_input.lower() in ["quit", "q"]:
+            user_input = input("\nEnter your message: ").strip()
+            if user_input.lower() in ["quit", "q"]:
                 break
 
-            scene_info = self.get_current_scene()
-            full_input = f"{user_input}\n\n{scene_info}"
+            # Extract object query using NLP
+            query = self._extract_object_query(user_input)
+            scene_info = self.get_scene_info(query) if query else ""
+            
+            full_input = f"{user_input}\n\n{scene_info}" if scene_info else user_input
             self.messages.append({"role": "user", "content": full_input})
-           
+            
             try:
                 response = self.client.messages.create(
-                    model="claude-3-5-sonnet-latest",
+                    model="claude-3-5-sonnet-20241022",
                     max_tokens=1024,
                     messages=self.messages,
                     system=self.system_prompt
@@ -207,13 +206,13 @@ You are a robot with 5 degrees of freedom (not counting claw). You will respond 
             except Exception as e:
                 print("Error:", e)
                 print("Try again.")
-               
+                
         print("Ending chat...")
         self.scene_perception.stop()
         self.serial.close()
 
 def main():
-    chat = ClaudeChat()
+    chat = RobotChat()
     chat.start_chat()
 
 if __name__ == "__main__":
