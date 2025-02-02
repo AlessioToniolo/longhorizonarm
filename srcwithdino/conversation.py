@@ -1,47 +1,15 @@
 import os
 import json
 import time
-import threading
 import serial
 import sys
-import speech_recognition as sr
 from dotenv import load_dotenv
 from anthropic import Anthropic
 from perception import ScenePerception
 
 load_dotenv()
 
-class VoiceRecognizer:
-    def __init__(self):
-        self.recognizer = sr.Recognizer()
-        self.microphone = sr.Microphone()
-        with self.microphone as source:
-            self.recognizer.adjust_for_ambient_noise(source)
-        self.audio_data = None
-
-    def capture_audio(self):
-        with self.microphone as source:
-            print("\nListening... (Press Enter to stop)")
-            self.audio_data = self.recognizer.listen(source)
-
-    def listen(self):
-        try:
-            thread = threading.Thread(target=self.capture_audio)
-            thread.start()
-            input()  # Stop listening when user presses Enter
-            thread.join()
-            if self.audio_data:
-                print("Processing speech...")
-                text = self.recognizer.recognize_google(self.audio_data)
-                print(f"Recognized: {text}")
-                return text
-        except sr.UnknownValueError:
-            print("Could not understand audio")
-        except sr.RequestError as e:
-            print(f"Speech service error: {e}")
-        return None
-
-class ClaudeChat:
+class RobotChat:
     def __init__(self):
         self._init_apis()
         self._init_hardware()
@@ -72,7 +40,7 @@ these fields: base, shoulder1, shoulder2, wrist, twist, gripper, and delayAfter 
     {"base": 120, "shoulder1": 100, "shoulder2": 80, "wrist": 90, "twist": 60, "gripper": 110, "delayAfter": 500}
 ]
 
- (make sure to not add comments in between each command, because it will break my python code to proceses)
+(make sure to not add comments in between each command, because it will break my python code to process)
 
 Gripper open is 170, closed is 110, with linear interpolation between.
 The twist servo rotates the end effector on a plane perpendicular to other joints.
@@ -80,13 +48,56 @@ The twist servo rotates the end effector on a plane perpendicular to other joint
 When asked about objects, you'll receive information about the specific object detected, including its 3D position.
 The camera is mounted on the end effector, so coordinates are relative to your end effector position."""
 
+        self.query_extraction_prompt = """You are a natural language processing expert focused on extracting object queries from user input. Your task is to identify if a user is asking about finding, locating, or interacting with an object, and extract the object description.
+
+Rules:
+1. If the user is asking about finding or interacting with an object, return a JSON object with:
+   - "has_query": true
+   - "object_description": detailed description of the object
+   - "action": the intended action (find, pick up, move, etc.)
+2. If the user is not asking about an object, return:
+   - "has_query": false
+   - "object_description": null
+   - "action": null
+
+Examples:
+
+Input: "Can you find the blue coffee mug?"
+Output: {
+    "has_query": true,
+    "object_description": "blue coffee mug",
+    "action": "find"
+}
+
+Input: "Pick up the red pen next to the notebook"
+Output: {
+    "has_query": true,
+    "object_description": "red pen near notebook",
+    "action": "pick up"
+}
+
+Input: "Wave hello"
+Output: {
+    "has_query": false,
+    "object_description": null,
+    "action": null
+}
+
+Input: "Move your base joint to 90 degrees"
+Output: {
+    "has_query": false,
+    "object_description": null,
+    "action": null
+}
+
+Respond only with the JSON object, no additional text or explanation."""
+
     def _init_apis(self):
-        """Initialize API clients"""
+        """Initialize API clients and perception system"""
         api_key = os.getenv('ANTHROPIC_API_KEY')
         if not api_key:
             raise ValueError("Missing ANTHROPIC_API_KEY in .env file")
         self.client = Anthropic(api_key=api_key)
-        self.voice_recognizer = VoiceRecognizer()
         self.scene_perception = ScenePerception(enable_visualization=True)
 
     def _init_hardware(self):
@@ -99,26 +110,44 @@ The camera is mounted on the end effector, so coordinates are relative to your e
             raise
 
     def _extract_object_query(self, user_input):
-        """Extract object query from user input"""
-        # Simple keyword-based extraction - could be enhanced with NLP
-        keywords = ["find", "look for", "locate", "where is", "search for", "detect"]
-        for keyword in keywords:
-            if keyword in user_input.lower():
-                query = user_input.lower().split(keyword)[-1].strip()
-                return query
-        return None
+        """Extract object query from user input using Claude's NLP capabilities"""
+        try:
+            # Get NLP analysis from Claude
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=150,  # Small response size since we only need the JSON
+                messages=[{
+                    "role": "user",
+                    "content": user_input
+                }],
+                system=self.query_extraction_prompt
+            )
+            
+            # Parse the response
+            try:
+                result = json.loads(response.content[0].text)
+                if result["has_query"]:
+                    return result["object_description"]
+                return None
+            except json.JSONDecodeError:
+                print("Error parsing Claude's query extraction response")
+                return None
+                
+        except Exception as e:
+            print(f"Error in query extraction: {e}")
+            return None
 
     def get_scene_info(self, query=None):
         """Get scene information for a specific query"""
         if not query:
             return "No specific object queried."
             
-        detected_object = self.scene_perception.detect_object(query)
+        detected_object = self.scene_perception.find_object(query)
         if not detected_object:
             return f"Could not find {query} in the scene."
             
         x, y, z = detected_object['position']
-        return f"Found {query} (confidence: {detected_object['confidence']:.2f}) at X:{x:.3f}, Y:{y:.3f}, Z:{z:.3f}"
+        return f"Found {query} (confidence: {detected_object['score']:.2f}) at X:{x:.3f}, Y:{y:.3f}, Z:{z:.3f}"
 
     def send_command(self, command):
         """Send movement command to robot"""
@@ -149,24 +178,18 @@ The camera is mounted on the end effector, so coordinates are relative to your e
 
     def start_chat(self):
         """Start the interactive chat session"""
-        print("Chat started. Say 'quit' or 'q' to exit.")
-        print("Press Enter for keyboard input.")
+        print("Chat started. Type 'quit' or 'q' to exit.")
         
         while True:
-            print("\nPress Enter to type or speak:")
-            choice = input().strip().lower()
-            if choice == "q":
-                break
-                
-            user_input = input("Type your message: ").strip() if choice else self.voice_recognizer.listen()
-            if not user_input or user_input.lower() in ["quit", "q"]:
+            user_input = input("\nEnter your message: ").strip()
+            if user_input.lower() in ["quit", "q"]:
                 break
 
-            # Extract object query and get scene info if applicable
+            # Extract object query using NLP
             query = self._extract_object_query(user_input)
-            scene_info = self.get_scene_info(query) if query else "No specific object queried."
+            scene_info = self.get_scene_info(query) if query else ""
             
-            full_input = f"{user_input}\n\n{scene_info}"
+            full_input = f"{user_input}\n\n{scene_info}" if scene_info else user_input
             self.messages.append({"role": "user", "content": full_input})
             
             try:
@@ -189,7 +212,7 @@ The camera is mounted on the end effector, so coordinates are relative to your e
         self.serial.close()
 
 def main():
-    chat = ClaudeChat()
+    chat = RobotChat()
     chat.start_chat()
 
 if __name__ == "__main__":
